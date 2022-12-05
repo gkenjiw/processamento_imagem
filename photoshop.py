@@ -6,6 +6,7 @@ import PySimpleGUI as sg
 from PIL import Image
 from pathlib import Path
 from PIL.ExifTags import TAGS, GPSTAGS
+from filters import *
 
 file_types = [("(JPEG (*.jpg)","*.jpg"),
               ("All files (*.*)", "*.*")]
@@ -24,7 +25,9 @@ fields = {
     "Flash" : "Flash",
     "FocalLength" : "Focal Length",
     "ISOSpeedRatings" : "ISO",
-    "ShutterSpeedValue" : "Shutter Speed"
+    "ShutterSpeedValue" : "Shutter Speed",
+    "GPSLatitude": "Latitude",
+    "GPSLongitude": "Longitude"
 }
 
 
@@ -48,7 +51,9 @@ def carrega_imagem(filename, window):
 def reduzir_qualidade(filename, qualidade):
     if os.path.exists(filename):
         imagem = Image.open(filename)
-        imagem.save("baixa_qualidade.jpg", format="JPEG", optimize=True, quality=int(qualidade))
+        file = filename.split('.')
+        file = f'{file[0]}_{qualidade}.jpg'
+        imagem.save(file, format="JPEG", optimize=True, quality=int(qualidade))
 
 def abre_url(url, window):
     imagem = requests.get(url)
@@ -89,25 +94,64 @@ def exibir_exif(filename, path, window):
             else:
                 window[field].update(exif_data.get(field, "No data"))
 
-def mirror(image_path, output_image_path): #espelhar
+def mirror_top_bot(image_path, output_image_path, window): #espelhar
     image = Image.open(image_path)
     mirror_image = image.transpose(Image.FLIP_TOP_BOTTOM) #FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM, TRANSPOSE
     mirror_image.save(output_image_path)
+    carrega_imagem(output_image_path, window)
 
-def crop_image(image_path, coords, output_image_path): #recortar
+def mirror_left_right(image_path, output_image_path, window): #espelhar
+    image = Image.open(image_path)
+    mirror_image = image.transpose(Image.FLIP_LEFT_RIGHT) #FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM, TRANSPOSE
+    mirror_image.save(output_image_path)
+    carrega_imagem(output_image_path, window)
+
+def crop_image(image_path, coords): #recortar
     image = Image.open(image_path)
     cropped_image = image.crop(coords)
-    cropped_image.save(output_image_path)
+    file = image_path.split('.')
+    file = f'{file[0]}_crop.jpg'
+    cropped_image.save(file, format="JPEG")
 
 def resize(input_image_path, output_image_path, size):
     image = Image.open(input_image_path)
     resized_image = image.resize(size)
     resized_image.save(output_image_path)
 
-def rotate(image_path, degrees_to_rotate, output_image_path):
+def rotate(image_path, degrees_to_rotate, output_image_path, window):
     image_obj = Image.open(image_path)
     rotated_image = image_obj.rotate(degrees_to_rotate)
     rotated_image.save(output_image_path)
+    carrega_imagem(output_image_path, window)
+
+def apply_filter(image_path, window, filter):
+    match filter:
+        case "Blur":
+            output = filter_blur(image_path)
+        case "Box Blur":
+            output = filter_box_blur(image_path)
+        case "Contour":
+            output = filter_contour(image_path)
+        case "Detail":
+            output = filter_detail(image_path)
+        case "Edge Enhance":
+            output = filter_edge_enhance(image_path)
+        case "Emboss":
+            output = filter_emboss(image_path)
+        case "Find Edges":
+            output = filter_find_edges(image_path)
+        case "Gaussian Blur":
+            output = filter_gaussian_blur(image_path)
+        case "Sharpen":
+            output = filter_sharpen(image_path)
+        case "Smooth":
+            output = filter_smooth(image_path)
+        case _:            
+            carrega_imagem(image_path, window)
+    
+    carrega_imagem(output, window)
+        
+
 
 
 def main():
@@ -121,11 +165,17 @@ def main():
             sg.Button("Gerar Thumbnail"),
             sg.Text("Selecione a Qualidade:"),
             sg.Combo(['0','25','50','75','100'], default_value="0", key="-QUALITY-"),
-            sg.Button("Salvar com a Qualidade"),        
+            sg.Button("Salvar com a Qualidade"),
+            sg.Button("Girar"),
+            sg.Button("Espelhar de cima"),
+            sg.Button("Espelhar de lado"),
             sg.Button("Abrir URL"),
             sg.Button("Salvar da Web")
         ],
         [
+            sg.Combo(['Blur', 'Box Blur', 'Contour', 'Detail', 'Edge Enhance', 'Emboss', 'Find Edges', 'Gaussian Blur', 'Sharpen', 'Smooth'], default_value='None', key="-FILTER-"),
+            sg.Button("Aplicar Filtro"),
+            sg.Button("Recortar"),
             sg.Button("Metadados")
         ]
     ]
@@ -147,12 +197,18 @@ def main():
             carrega_imagem(filename, window)
         if event == "Gerar Thumbnail":
             cria_thumbnail(filename)
-        if event == "Salvar com menos Qualidade":
+        if event == "Salvar com a Qualidade":
             reduzir_qualidade(filename, value["-QUALITY-"])
+        if event == "Girar":
+            rotate(filename, 90, filename, window)
+        if event == "Espelhar de cima":
+            mirror_top_bot(filename, filename, window)
+        if event == "Espelhar de lado":
+            mirror_left_right(filename, filename, window)
         if event == "Abrir URL":
             abre_url(filename,window)
-        if event == "Salvar da Web":
-            salvar_url(filename)
+        if event == "Aplicar Filtro":
+            apply_filter(filename, window, value["-FILTER-"])
         if event == "Metadados":
             exibir_exif(filename, value["-LOAD-"], window)
         if event == "-IMAGE-":
@@ -168,6 +224,12 @@ def main():
                 retangulo = window["-IMAGE-"].draw_rectangle(ponto_inicial, ponto_final, line_color='red')
         elif event.endswith('+UP'):
             dragging = False
+        if event == "Recortar":
+            left = min(ponto_inicial[0], ponto_final[0])
+            upper = min(400-ponto_inicial[1], 400-ponto_final[1]) 
+            right = max(ponto_inicial[0], ponto_final[0]) 
+            lower = max(400-ponto_inicial[1], 400-ponto_final[1]) 
+            crop_image(filename, (left, upper, right, lower))
 
     window.close()
 
